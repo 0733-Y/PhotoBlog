@@ -16,6 +16,7 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.OkHttpClient
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -26,12 +27,14 @@ import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.Part
 import java.net.HttpURLConnection
+import java.net.Proxy
 import java.net.URL
 import java.util.concurrent.Executors
+import org.json.JSONArray
 
 class MainActivity : AppCompatActivity() {
-    // Android emulator에서 호스트 PC의 Django 서버에 접속하는 주소
-    private val baseUrl = "http://10.0.2.2:8000/"
+    // 로컬 검증은 `adb reverse tcp:8000 tcp:8000`으로 호스트 Django에 연결한다.
+    private val baseUrl = "http://127.0.0.1:8000/"
     private lateinit var selectedImage: Uri
     private lateinit var imageView: ImageView
     private lateinit var statusText: TextView
@@ -43,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private val api by lazy {
         Retrofit.Builder()
             .baseUrl(baseUrl)
+            .client(OkHttpClient.Builder().proxy(Proxy.NO_PROXY).build())
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(PhotoBlogApi::class.java)
@@ -118,21 +122,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadPosts() {
-        api.getPosts().enqueue(object : Callback<List<Post>> {
-            override fun onResponse(call: Call<List<Post>>, response: Response<List<Post>>) {
-                if (!response.isSuccessful) {
-                    statusText.text = "게시글 조회 실패: HTTP ${response.code()}"
-                    return
+        Executors.newSingleThreadExecutor().execute {
+            try {
+                val connection = (URL(baseUrl + "api_root/Post/").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15000
+                    readTimeout = 15000
                 }
-                postsContainer.removeAllViews()
-                response.body().orEmpty().forEach { addPostView(it) }
-                statusText.text = "동기화 완료 · ${response.body().orEmpty().size}개 게시글"
+                val responseText = connection.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONArray(responseText)
+                val posts = buildList {
+                    for (index in 0 until json.length()) {
+                        val item = json.getJSONObject(index)
+                        add(Post(
+                            id = item.getInt("id"),
+                            author = item.getInt("author"),
+                            title = item.optString("title"),
+                            text = item.optString("text"),
+                            image = item.optString("image").takeIf { it.isNotBlank() }
+                        ))
+                    }
+                }
+                runOnUiThread {
+                    postsContainer.removeAllViews()
+                    posts.forEach { addPostView(it) }
+                    statusText.text = "동기화 완료 · ${posts.size}개 게시글"
+                }
+            } catch (error: Exception) {
+                runOnUiThread { statusText.text = "서버 연결 실패: ${error.message}" }
             }
-
-            override fun onFailure(call: Call<List<Post>>, t: Throwable) {
-                statusText.text = "서버 연결 실패: ${t.message}"
-            }
-        })
+        }
     }
 
     private fun addPostView(post: Post) {
