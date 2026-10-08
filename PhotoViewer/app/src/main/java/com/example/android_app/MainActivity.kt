@@ -33,8 +33,8 @@ import java.util.concurrent.Executors
 import org.json.JSONArray
 
 class MainActivity : AppCompatActivity() {
-    // 로컬 검증은 `adb reverse tcp:8000 tcp:8000`으로 호스트 Django에 연결한다.
-    private val baseUrl = "http://127.0.0.1:8000/"
+    // PythonAnywhere에 배포된 Django REST API를 사용한다.
+    private val baseUrl = "https://0733.pythonanywhere.com/"
     private lateinit var selectedImage: Uri
     private lateinit var imageView: ImageView
     private lateinit var statusText: TextView
